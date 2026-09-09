@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Threading;
 using LangWhisper.Configuration;
+using LangWhisper.Diagnostics;
 using LangWhisper.Interop;
 
 namespace LangWhisper.Audio;
@@ -54,20 +55,25 @@ public sealed class CuePlayer : IDisposable
             try
             {
                 CueMode mode = _settings.Mode;
+                string label = request.Culture?.EnglishName ?? $"LANGID 0x{request.LangId:X4}";
 
                 if (mode is CueMode.Beep or CueMode.WhisperAndBeep)
                 {
+                    double hz = ResolveFrequency(request);
+                    Log.Write($"cue: beep {hz:0} Hz for {label}");
                     PlayBeep(request);
                 }
 
                 if (mode is CueMode.Whisper or CueMode.WhisperAndBeep)
                 {
+                    Log.Write($"cue: whisper \"{SpokenName(request.Culture)}\"");
                     Speak(request);
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // Audio glitches are never fatal.
+                Log.Write($"cue: playback error: {ex.Message}");
             }
         }
     }

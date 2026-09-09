@@ -35,16 +35,16 @@ public sealed class AppSettings
     public bool SpeakNativeName { get; set; }
 
     /// <summary>SAPI volume for the spoken whisper, 0-100.</summary>
-    public int WhisperVolume { get; set; } = 55;
+    public int WhisperVolume { get; set; } = 80;
 
     /// <summary>SAPI speaking rate for the whisper, -10 (slow) to 10 (fast).</summary>
     public int WhisperRate { get; set; } = 2;
 
     /// <summary>Amplitude of the beep tone, 0-100.</summary>
-    public int BeepVolume { get; set; } = 30;
+    public int BeepVolume { get; set; } = 75;
 
     /// <summary>Length of the beep tone in milliseconds.</summary>
-    public int BeepDurationMs { get; set; } = 150;
+    public int BeepDurationMs { get; set; } = 320;
 
     /// <summary>
     /// Delay (ms) after the last focus event before the language is read and the cue

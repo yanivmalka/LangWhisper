@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Windows.Forms;
+using LangWhisper.Diagnostics;
 using LangWhisper.Tray;
 
 namespace LangWhisper;
@@ -18,8 +19,10 @@ internal static class Program
             return;
         }
 
+        Log.Write($"--- LangWhisper starting (pid {Environment.ProcessId}) ---");
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayApplicationContext());
+        Log.Write("--- LangWhisper exited ---");
 
         GC.KeepAlive(mutex);
     }

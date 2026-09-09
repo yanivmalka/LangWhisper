@@ -2,6 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using LangWhisper.Audio;
 using LangWhisper.Configuration;
+using LangWhisper.Diagnostics;
 using LangWhisper.Interop;
 using Timer = System.Windows.Forms.Timer;
 
@@ -116,26 +117,34 @@ public sealed class FocusLanguageMonitor : IDisposable
 
             if (!EditableFocusDetector.IsEditable(foreground))
             {
+                Log.Write("focus: not an editable field, ignoring");
                 return;
             }
 
             int langId = KeyboardLayoutReader.GetForegroundLanguageId();
             if (langId <= 0)
             {
+                Log.Write("focus: editable field but keyboard language unknown");
                 return;
             }
 
+            var culture = KeyboardLayoutReader.TryGetCulture(langId);
+            string name = culture?.EnglishName ?? $"LANGID 0x{langId:X4}";
+
             if (_settings.AnnounceOnlyOnChange && langId == _lastAnnouncedLangId)
             {
+                Log.Write($"focus: editable field, language {name} unchanged, staying quiet");
                 return;
             }
 
             _lastAnnouncedLangId = langId;
-            _player.Announce(KeyboardLayoutReader.TryGetCulture(langId), langId);
+            Log.Write($"focus: editable field, announcing {name}");
+            _player.Announce(culture, langId);
         }
-        catch
+        catch (Exception ex)
         {
             // A single failed read must never take the monitor down.
+            Log.Write($"focus: processing error: {ex.Message}");
         }
         finally
         {

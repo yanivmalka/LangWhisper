@@ -31,7 +31,7 @@ collapses into a single announcement.
 
 ## Build & run
 
-Requires the .NET 8 SDK (Windows).
+Requires the .NET 10 SDK (Windows).
 
 ```powershell
 dotnet build LangWhisper.sln -c Release
