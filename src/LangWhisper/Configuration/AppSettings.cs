@@ -49,9 +49,10 @@ public sealed class AppSettings
     /// <summary>
     /// Delay (ms) after the last focus event before the language is read and the cue
     /// played. Coalesces the burst of events Windows fires during a window switch and
-    /// lets the keyboard layout settle.
+    /// gives the foreground window's remembered keyboard layout time to be applied
+    /// (the read is then settle-sampled on top of this).
     /// </summary>
-    public int DebounceMs { get; set; } = 150;
+    public int DebounceMs { get; set; } = 250;
 
     /// <summary>
     /// Beep frequency (Hz) per two-letter ISO language code. Languages not listed here

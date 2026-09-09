@@ -121,10 +121,18 @@ public sealed class FocusLanguageMonitor : IDisposable
                 return;
             }
 
-            int langId = KeyboardLayoutReader.GetForegroundLanguageId();
+            int langId = ReadSettledLanguageId();
             if (langId <= 0)
             {
                 Log.Write("focus: editable field but keyboard language unknown");
+                return;
+            }
+
+            // If the user has already moved on to another window while we were
+            // waiting for the layout to settle, let the pending event handle it.
+            if (NativeMethods.GetForegroundWindow() != foreground)
+            {
+                Log.Write("focus: foreground changed while settling, deferring");
                 return;
             }
 
@@ -150,6 +158,37 @@ public sealed class FocusLanguageMonitor : IDisposable
         {
             Interlocked.Exchange(ref _processing, 0);
         }
+    }
+
+    /// <summary>
+    /// Reads the foreground keyboard language, waiting for it to stop changing.
+    /// When a window becomes foreground Windows applies its remembered layout a
+    /// moment later, so an immediate read frequently returns the language of the
+    /// window the user just left. We sample repeatedly and only trust a value
+    /// once two consecutive reads agree (or we run out of attempts, in which case
+    /// the freshest read wins).
+    /// </summary>
+    private static int ReadSettledLanguageId()
+    {
+        const int maxAttempts = 5;
+        const int gapMs = 120;
+
+        int previous = KeyboardLayoutReader.GetForegroundLanguageId();
+
+        for (int attempt = 1; attempt < maxAttempts; attempt++)
+        {
+            Thread.Sleep(gapMs);
+            int current = KeyboardLayoutReader.GetForegroundLanguageId();
+
+            if (current > 0 && current == previous)
+            {
+                return current;
+            }
+
+            previous = current;
+        }
+
+        return previous;
     }
 
     public void Dispose()
