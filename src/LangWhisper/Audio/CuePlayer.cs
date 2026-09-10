@@ -37,15 +37,19 @@ public sealed class CuePlayer : IDisposable
         _worker.Start();
     }
 
-    /// <summary>Queue an announcement for the given culture (may be null if the locale is unknown).</summary>
-    public void Announce(CultureInfo? culture, int langId)
+    /// <summary>
+    /// Queue an announcement for the given culture (may be null if the locale is
+    /// unknown). Pass <paramref name="modeOverride"/> to force a specific signal
+    /// instead of the configured default <see cref="AppSettings.Mode"/>.
+    /// </summary>
+    public void Announce(CultureInfo? culture, int langId, CueMode? modeOverride = null)
     {
         if (_queue.IsAddingCompleted || _queue.Count > MaxQueued)
         {
             return;
         }
 
-        _queue.Add(new Request(culture, langId));
+        _queue.Add(new Request(culture, langId, modeOverride));
     }
 
     private void RunWorker()
@@ -54,7 +58,7 @@ public sealed class CuePlayer : IDisposable
         {
             try
             {
-                CueMode mode = _settings.Mode;
+                CueMode mode = request.ModeOverride ?? _settings.Mode;
                 string label = request.Culture?.EnglishName ?? $"LANGID 0x{request.LangId:X4}";
 
                 if (mode is CueMode.Beep or CueMode.WhisperAndBeep)
@@ -175,5 +179,5 @@ public sealed class CuePlayer : IDisposable
         _queue.Dispose();
     }
 
-    private readonly record struct Request(CultureInfo? Culture, int LangId);
+    private readonly record struct Request(CultureInfo? Culture, int LangId, CueMode? ModeOverride);
 }

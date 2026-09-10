@@ -9,9 +9,14 @@ using Timer = System.Windows.Forms.Timer;
 namespace LangWhisper.Monitoring;
 
 /// <summary>
-/// Watches for foreground-window and focus changes. When focus lands on an editable
-/// text field it reads the active keyboard language and asks the <see cref="CuePlayer"/>
-/// to announce it (subject to the "only on change" setting).
+/// Announces the active keyboard language on three triggers:
+/// <list type="bullet">
+///   <item>focus lands on an editable text field (window switch or in-window focus),</item>
+///   <item>the foreground window changes to another editable window,</item>
+///   <item>the keyboard layout itself is switched (Alt+Shift, Win+Space, language bar).</item>
+/// </list>
+/// The first two are event-driven (WinEvent hooks + debounce); the layout switch is
+/// found by a light poll because Windows raises no accessible event for it.
 /// </summary>
 public sealed class FocusLanguageMonitor : IDisposable
 {
@@ -21,11 +26,15 @@ public sealed class FocusLanguageMonitor : IDisposable
     // Keep a field reference so the delegate passed to SetWinEventHook is not collected.
     private readonly NativeMethods.WinEventProc _callback;
     private readonly Timer _debounce;
+    private readonly Timer _languagePoll;
 
     private IntPtr _foregroundHook;
     private IntPtr _focusHook;
     private int _processing;
-    private int _lastAnnouncedLangId = -1;
+
+    private IntPtr _lastForeground;
+    private int _lastSeenLangId = -1;      // last language observed in the foreground, announced or not
+    private int _lastAnnouncedLangId = -1; // last language actually spoken/beeped
     private bool _started;
 
     public FocusLanguageMonitor(AppSettings settings, CuePlayer player)
@@ -33,8 +42,12 @@ public sealed class FocusLanguageMonitor : IDisposable
         _settings = settings;
         _player = player;
         _callback = OnWinEvent;
+
         _debounce = new Timer { Interval = Math.Max(30, _settings.DebounceMs) };
         _debounce.Tick += OnDebounceElapsed;
+
+        _languagePoll = new Timer { Interval = Math.Max(120, _settings.LanguagePollMs) };
+        _languagePoll.Tick += OnLanguagePollTick;
     }
 
     /// <summary>Installs the hooks. Must be called on the UI thread (it owns the message pump).</summary>
@@ -63,11 +76,16 @@ public sealed class FocusLanguageMonitor : IDisposable
             0,
             NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
 
+        _languagePoll.Start();
         _started = true;
     }
 
-    /// <summary>Forget the last announced language so the next focus re-announces.</summary>
-    public void ResetLastAnnounced() => Interlocked.Exchange(ref _lastAnnouncedLangId, -1);
+    /// <summary>Forget the last announced language so the next trigger re-announces.</summary>
+    public void ResetLastAnnounced()
+    {
+        Interlocked.Exchange(ref _lastAnnouncedLangId, -1);
+        Interlocked.Exchange(ref _lastSeenLangId, -1);
+    }
 
     private void OnWinEvent(
         IntPtr hWinEventHook,
@@ -92,10 +110,27 @@ public sealed class FocusLanguageMonitor : IDisposable
     private void OnDebounceElapsed(object? sender, EventArgs e)
     {
         _debounce.Stop();
-        _ = Task.Run(Process);
+        _ = Task.Run(ProcessFocusEvent);
     }
 
-    private void Process()
+    private void OnLanguagePollTick(object? sender, EventArgs e)
+    {
+        if (!_settings.Enabled || !_settings.AnnounceOnLanguageChange)
+        {
+            return;
+        }
+
+        // A focus/window event is mid-flight; it will pick up the current layout itself.
+        if (Volatile.Read(ref _processing) == 1)
+        {
+            return;
+        }
+
+        _ = Task.Run(ProcessLanguagePoll);
+    }
+
+    /// <summary>Handles a foreground-window or focus change.</summary>
+    private void ProcessFocusEvent()
     {
         if (Interlocked.Exchange(ref _processing, 1) == 1)
         {
@@ -115,13 +150,24 @@ public sealed class FocusLanguageMonitor : IDisposable
                 return;
             }
 
-            if (!EditableFocusDetector.IsEditable(foreground))
+            bool windowChanged = foreground != _lastForeground;
+            bool editable = EditableFocusDetector.IsEditable(foreground);
+
+            int langId = ReadSettledLanguageId();
+
+            // Track state regardless of whether we announce, so later triggers compare fairly.
+            _lastForeground = foreground;
+            if (langId > 0)
+            {
+                _lastSeenLangId = langId;
+            }
+
+            if (!editable)
             {
                 Log.Write("focus: not an editable field, ignoring");
                 return;
             }
 
-            int langId = ReadSettledLanguageId();
             if (langId <= 0)
             {
                 Log.Write("focus: editable field but keyboard language unknown");
@@ -139,20 +185,91 @@ public sealed class FocusLanguageMonitor : IDisposable
             var culture = KeyboardLayoutReader.TryGetCulture(langId);
             string name = culture?.EnglishName ?? $"LANGID 0x{langId:X4}";
 
-            if (_settings.AnnounceOnlyOnChange && langId == _lastAnnouncedLangId)
+            bool announce;
+            string reason;
+
+            if (windowChanged && _settings.AnnounceOnWindowSwitch)
             {
-                Log.Write($"focus: editable field, language {name} unchanged, staying quiet");
+                announce = true;
+                reason = "window switch";
+            }
+            else if (!_settings.AnnounceOnlyOnChange || langId != _lastAnnouncedLangId)
+            {
+                announce = true;
+                reason = "focus change";
+            }
+            else
+            {
+                announce = false;
+                reason = "unchanged";
+            }
+
+            if (!announce)
+            {
+                Log.Write($"focus: editable field, language {name} ({reason}), staying quiet");
                 return;
             }
 
             _lastAnnouncedLangId = langId;
-            Log.Write($"focus: editable field, announcing {name}");
+            Log.Write($"focus: editable field, announcing {name} ({reason})");
             _player.Announce(culture, langId);
         }
         catch (Exception ex)
         {
             // A single failed read must never take the monitor down.
             Log.Write($"focus: processing error: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _processing, 0);
+        }
+    }
+
+    /// <summary>Handles a keyboard-layout switch detected by polling.</summary>
+    private void ProcessLanguagePoll()
+    {
+        if (Interlocked.Exchange(ref _processing, 1) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_settings.Enabled || !_settings.AnnounceOnLanguageChange)
+            {
+                return;
+            }
+
+            int langId = KeyboardLayoutReader.GetForegroundLanguageId();
+            if (langId <= 0)
+            {
+                return;
+            }
+
+            if (_lastSeenLangId <= 0)
+            {
+                // First observation: establish the baseline silently.
+                _lastSeenLangId = langId;
+                return;
+            }
+
+            if (langId == _lastSeenLangId)
+            {
+                return;
+            }
+
+            // The layout was actually switched.
+            _lastSeenLangId = langId;
+            _lastAnnouncedLangId = langId;
+
+            var culture = KeyboardLayoutReader.TryGetCulture(langId);
+            string name = culture?.EnglishName ?? $"LANGID 0x{langId:X4}";
+            Log.Write($"language switch: announcing {name} ({_settings.LanguageChangeSignal})");
+            _player.Announce(culture, langId, _settings.LanguageChangeSignal);
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"language poll error: {ex.Message}");
         }
         finally
         {
@@ -196,6 +313,10 @@ public sealed class FocusLanguageMonitor : IDisposable
         _debounce.Stop();
         _debounce.Tick -= OnDebounceElapsed;
         _debounce.Dispose();
+
+        _languagePoll.Stop();
+        _languagePoll.Tick -= OnLanguagePollTick;
+        _languagePoll.Dispose();
 
         if (_foregroundHook != IntPtr.Zero)
         {

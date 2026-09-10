@@ -6,8 +6,17 @@ A tiny Windows 11 tray assistant. When you move focus to a window and land on a
 the language name or by playing a *soft beep* whose pitch is mapped to that
 language.
 
-By default it only speaks up when the language differs from the one it last
-announced, so it stays quiet while you work in a single language.
+It announces on three triggers:
+
+- **Switching to another window** that has a text field — always, even if the
+  language did not change (*whisper* by default).
+- **Focusing a text field within the same window** — only if the language
+  differs from the last announced one (configurable).
+- **Switching the keyboard layout** yourself (Alt+Shift, Win+Space, language
+  bar) — a *beep* by default, so a deliberate toggle gets a quick confirmation.
+
+Each trigger can be turned off, and the window/focus signal and the
+language-switch signal are chosen independently (whisper / beep / both).
 
 ## Why
 
@@ -21,13 +30,16 @@ typing.
 | Concern | Mechanism |
 | --- | --- |
 | Notice focus/window changes | `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` |
+| Notice a keyboard-layout switch | light poll (~350 ms) of `GetKeyboardLayout`; Windows raises no accessible event for it |
 | Is there a typing cursor? | `GetGUIThreadInfo` caret check, then UI Automation (`ControlType.Edit` / `Document` / `TextPattern`, honouring read-only) |
 | Which language? | `GetKeyboardLayout` of the foreground thread → LANGID → `CultureInfo` |
 | Whisper | Late-bound `SAPI.SpVoice` (no NuGet dependency) |
 | Beep | Sine tone synthesised in memory, played via `winmm` `PlaySound` |
 
-Events are debounced (~150 ms) so the burst Windows fires during a window switch
-collapses into a single announcement.
+Focus/window events are debounced (~250 ms), then the language read is
+settle-sampled (repeated every 120 ms until two reads agree) because Windows
+applies a window's remembered layout a moment *after* it becomes foreground —
+otherwise the tool would report the language of the window you just left.
 
 ## Build & run
 
@@ -50,8 +62,11 @@ dotnet publish src/LangWhisper/LangWhisper.csproj -c Release -r win-x64 `
 The app lives in the system tray (no window). Right-click the icon for:
 
 - **Enabled** — master switch
-- **Signal** — Whisper / Beep / Whisper + beep
-- **Only announce on language change**
+- **Signal (window / focus)** — Whisper / Beep / Whisper + beep
+- **Signal (language switch)** — Whisper / Beep / Whisper + beep (default Beep)
+- **Announce when switching windows**
+- **Announce when keyboard language changes**
+- **Same window: only when language changed**
 - **Speak native language name** (`עברית` instead of `Hebrew`)
 - **Test cue**
 - **Settings…** — volumes, whisper rate, per-language beep frequencies

@@ -16,8 +16,14 @@ public sealed class SettingsForm : Form
     private readonly RadioButton _modeBeep = new() { Text = "Beep (tone)", AutoSize = true };
     private readonly RadioButton _modeBoth = new() { Text = "Whisper + beep", AutoSize = true };
 
-    private readonly CheckBox _onlyOnChange = new() { Text = "Only announce when the language changes", AutoSize = true };
+    private readonly CheckBox _onWindowSwitch = new() { Text = "Announce when switching to another window", AutoSize = true };
+    private readonly CheckBox _onLanguageChange = new() { Text = "Announce when the keyboard language is switched", AutoSize = true };
+    private readonly CheckBox _onlyOnChange = new() { Text = "Same window: only when the language changed", AutoSize = true };
     private readonly CheckBox _nativeName = new() { Text = "Speak the native language name", AutoSize = true };
+
+    private readonly RadioButton _langChangeWhisper = new() { Text = "Whisper", AutoSize = true };
+    private readonly RadioButton _langChangeBeep = new() { Text = "Beep", AutoSize = true };
+    private readonly RadioButton _langChangeBoth = new() { Text = "Whisper + beep", AutoSize = true };
 
     private readonly TrackBar _whisperVolume = new() { Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 260 };
     private readonly TrackBar _whisperRate = new() { Minimum = -10, Maximum = 10, TickFrequency = 2, Width = 260 };
@@ -65,8 +71,25 @@ public sealed class SettingsForm : Form
         root.Controls.Add(_modeBeep);
         root.Controls.Add(_modeBoth);
 
-        root.Controls.Add(SectionLabel("Behaviour"));
+        root.Controls.Add(SectionLabel("When to announce"));
+        root.Controls.Add(_onWindowSwitch);
+        root.Controls.Add(_onLanguageChange);
         root.Controls.Add(_onlyOnChange);
+
+        root.Controls.Add(SectionLabel("Signal for a keyboard-language switch"));
+        var langChangeGroup = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            Margin = new Padding(0),
+        };
+        langChangeGroup.Controls.Add(_langChangeWhisper);
+        langChangeGroup.Controls.Add(_langChangeBeep);
+        langChangeGroup.Controls.Add(_langChangeBoth);
+        root.Controls.Add(langChangeGroup);
+
+        root.Controls.Add(SectionLabel("Behaviour"));
         root.Controls.Add(_nativeName);
 
         root.Controls.Add(SectionLabel("Whisper volume"));
@@ -130,8 +153,14 @@ public sealed class SettingsForm : Form
         _modeBeep.Checked = _settings.Mode == CueMode.Beep;
         _modeBoth.Checked = _settings.Mode == CueMode.WhisperAndBeep;
 
+        _onWindowSwitch.Checked = _settings.AnnounceOnWindowSwitch;
+        _onLanguageChange.Checked = _settings.AnnounceOnLanguageChange;
         _onlyOnChange.Checked = _settings.AnnounceOnlyOnChange;
         _nativeName.Checked = _settings.SpeakNativeName;
+
+        _langChangeWhisper.Checked = _settings.LanguageChangeSignal == CueMode.Whisper;
+        _langChangeBeep.Checked = _settings.LanguageChangeSignal == CueMode.Beep;
+        _langChangeBoth.Checked = _settings.LanguageChangeSignal == CueMode.WhisperAndBeep;
 
         _whisperVolume.Value = Math.Clamp(_settings.WhisperVolume, 0, 100);
         _whisperRate.Value = Math.Clamp(_settings.WhisperRate, -10, 10);
@@ -152,6 +181,12 @@ public sealed class SettingsForm : Form
             : _modeBoth.Checked ? CueMode.WhisperAndBeep
             : CueMode.Whisper;
 
+        _settings.LanguageChangeSignal = _langChangeWhisper.Checked ? CueMode.Whisper
+            : _langChangeBoth.Checked ? CueMode.WhisperAndBeep
+            : CueMode.Beep;
+
+        _settings.AnnounceOnWindowSwitch = _onWindowSwitch.Checked;
+        _settings.AnnounceOnLanguageChange = _onLanguageChange.Checked;
         _settings.AnnounceOnlyOnChange = _onlyOnChange.Checked;
         _settings.SpeakNativeName = _nativeName.Checked;
 

@@ -22,14 +22,42 @@ public sealed class AppSettings
     /// <summary>Master on/off switch. When false nothing is announced.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Whisper, beep, or both.</summary>
+    /// <summary>Whisper, beep, or both. Used for window switches and in-window focus changes.</summary>
     public CueMode Mode { get; set; } = CueMode.Whisper;
 
     /// <summary>
-    /// When true (default) the cue plays only if the language differs from the one
-    /// last announced. When false it plays on every text-field focus.
+    /// Signal used specifically when the keyboard layout is switched (Alt+Shift,
+    /// Win+Space). Defaults to a beep so a deliberate layout toggle gets a quick,
+    /// non-spoken confirmation.
+    /// </summary>
+    public CueMode LanguageChangeSignal { get; set; } = CueMode.Beep;
+
+    /// <summary>
+    /// For a focus change *within the same window* (clicking from one text box to
+    /// another): when true (default) the cue plays only if the language differs
+    /// from the one last announced; when false it plays on every text-field focus.
+    /// Window switches and keyboard-layout changes are governed by the two options
+    /// below, not by this one.
     /// </summary>
     public bool AnnounceOnlyOnChange { get; set; } = true;
+
+    /// <summary>
+    /// Announce the language whenever you move to a different window that has a
+    /// text field, even if the language has not changed. Default on.
+    /// </summary>
+    public bool AnnounceOnWindowSwitch { get; set; } = true;
+
+    /// <summary>
+    /// Announce the new language whenever the keyboard layout is switched
+    /// (Alt+Shift, Win+Space, the language bar), regardless of focus. Default on.
+    /// </summary>
+    public bool AnnounceOnLanguageChange { get; set; } = true;
+
+    /// <summary>
+    /// How often (ms) to check whether the keyboard layout changed. Only used when
+    /// <see cref="AnnounceOnLanguageChange"/> is on.
+    /// </summary>
+    public int LanguagePollMs { get; set; } = 350;
 
     /// <summary>Speak the language's native name ("עברית") instead of its English name ("Hebrew").</summary>
     public bool SpeakNativeName { get; set; }

@@ -61,13 +61,31 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         menu.Items.Add(new ToolStripSeparator());
 
-        var signal = new ToolStripMenuItem("Signal");
+        var signal = new ToolStripMenuItem("Signal (window / focus)");
         signal.DropDownItems.Add(Radio("Whisper", _settings.Mode == CueMode.Whisper, () => SetMode(CueMode.Whisper)));
         signal.DropDownItems.Add(Radio("Beep", _settings.Mode == CueMode.Beep, () => SetMode(CueMode.Beep)));
         signal.DropDownItems.Add(Radio("Whisper + beep", _settings.Mode == CueMode.WhisperAndBeep, () => SetMode(CueMode.WhisperAndBeep)));
         menu.Items.Add(signal);
 
-        menu.Items.Add(Check("Only announce on language change", _settings.AnnounceOnlyOnChange, () =>
+        var langSignal = new ToolStripMenuItem("Signal (language switch)");
+        langSignal.DropDownItems.Add(Radio("Whisper", _settings.LanguageChangeSignal == CueMode.Whisper, () => SetLanguageSignal(CueMode.Whisper)));
+        langSignal.DropDownItems.Add(Radio("Beep", _settings.LanguageChangeSignal == CueMode.Beep, () => SetLanguageSignal(CueMode.Beep)));
+        langSignal.DropDownItems.Add(Radio("Whisper + beep", _settings.LanguageChangeSignal == CueMode.WhisperAndBeep, () => SetLanguageSignal(CueMode.WhisperAndBeep)));
+        menu.Items.Add(langSignal);
+
+        menu.Items.Add(Check("Announce when switching windows", _settings.AnnounceOnWindowSwitch, () =>
+        {
+            _settings.AnnounceOnWindowSwitch = !_settings.AnnounceOnWindowSwitch;
+            _settings.RaiseChanged();
+        }));
+
+        menu.Items.Add(Check("Announce when keyboard language changes", _settings.AnnounceOnLanguageChange, () =>
+        {
+            _settings.AnnounceOnLanguageChange = !_settings.AnnounceOnLanguageChange;
+            _settings.RaiseChanged();
+        }));
+
+        menu.Items.Add(Check("Same window: only when language changed", _settings.AnnounceOnlyOnChange, () =>
         {
             _settings.AnnounceOnlyOnChange = !_settings.AnnounceOnlyOnChange;
             _settings.RaiseChanged();
@@ -126,6 +144,12 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void SetMode(CueMode mode)
     {
         _settings.Mode = mode;
+        _settings.RaiseChanged();
+    }
+
+    private void SetLanguageSignal(CueMode mode)
+    {
+        _settings.LanguageChangeSignal = mode;
         _settings.RaiseChanged();
     }
 
