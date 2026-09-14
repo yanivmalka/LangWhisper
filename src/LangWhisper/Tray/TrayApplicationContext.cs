@@ -29,7 +29,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,
             Text = "LangWhisper — keyboard language cue",
             Visible = true,
         };
@@ -43,6 +43,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         SettingsStore.Save(_settings);
         _monitor.ResetLastAnnounced();
+        _monitor.UpdateKeyboardHook();
         if (_tray.ContextMenuStrip is not null)
         {
             RebuildMenu();
@@ -88,6 +89,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(Check("Same window: only when language changed", _settings.AnnounceOnlyOnChange, () =>
         {
             _settings.AnnounceOnlyOnChange = !_settings.AnnounceOnlyOnChange;
+            _settings.RaiseChanged();
+        }));
+
+        menu.Items.Add(Check($"Announce when typing after {_settings.TypingIdleSeconds}s idle", _settings.AnnounceOnTypingAfterIdle, () =>
+        {
+            _settings.AnnounceOnTypingAfterIdle = !_settings.AnnounceOnTypingAfterIdle;
             _settings.RaiseChanged();
         }));
 

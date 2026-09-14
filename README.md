@@ -14,6 +14,9 @@ It announces on three triggers:
   differs from the last announced one (configurable).
 - **Switching the keyboard layout** yourself (Alt+Shift, Win+Space, language
   bar) — a *beep* by default, so a deliberate toggle gets a quick confirmation.
+- **Starting to type after an idle focus** (optional, off by default) — the
+  first keystroke in a text field that has been focused for more than X seconds
+  re-announces the language, in case you forgot it while away.
 
 Each trigger can be turned off, and the window/focus signal and the
 language-switch signal are chosen independently (whisper / beep / both).
@@ -30,9 +33,10 @@ typing.
 | Concern | Mechanism |
 | --- | --- |
 | Notice focus/window changes | `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` |
+| Notice typing after an idle focus | `WH_KEYBOARD_LL` hook, installed only while that option is on |
 | Notice a keyboard-layout switch | light poll (~350 ms) of `GetKeyboardLayout`; Windows raises no accessible event for it |
 | Is there a typing cursor? | `GetGUIThreadInfo` caret check, then UI Automation (`ControlType.Edit` / `Document` / `TextPattern`, honouring read-only) |
-| Which language? | `GetKeyboardLayout` of the foreground thread → LANGID → `CultureInfo` |
+| Which language? | `GetKeyboardLayout` of the thread owning the focused control (`GetGUIThreadInfo`) → LANGID → `CultureInfo`. Not the top-level window's thread: Windows 11 Notepad runs each tab's editor on its own thread with its own layout |
 | Whisper | Late-bound `SAPI.SpVoice` (no NuGet dependency) |
 | Beep | Sine tone synthesised in memory, played via `winmm` `PlaySound` |
 
@@ -67,9 +71,11 @@ The app lives in the system tray (no window). Right-click the icon for:
 - **Announce when switching windows**
 - **Announce when keyboard language changes**
 - **Same window: only when language changed**
+- **Announce when typing after Xs idle** (X is set in Settings → Triggers)
 - **Speak native language name** (`עברית` instead of `Hebrew`)
 - **Test cue**
-- **Settings…** — volumes, whisper rate, per-language beep frequencies
+- **Settings…** — volumes, whisper rate, and a sound (tone / double beep /
+  chime), pitch and preview button for each installed keyboard language
 - **Start with Windows**
 - **Open config folder** — `%APPDATA%\LangWhisper\settings.json`
 

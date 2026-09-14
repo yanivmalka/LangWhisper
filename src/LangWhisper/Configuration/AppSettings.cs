@@ -10,6 +10,14 @@ public enum CueMode
     WhisperAndBeep,
 }
 
+/// <summary>The shape of the beep, so languages stay distinguishable beyond pitch alone.</summary>
+public enum BeepSound
+{
+    Tone,
+    DoubleBeep,
+    Chime,
+}
+
 /// <summary>
 /// User-configurable settings. Persisted as JSON under
 /// <c>%APPDATA%\LangWhisper\settings.json</c>. A single instance of this object is
@@ -52,6 +60,15 @@ public sealed class AppSettings
     /// (Alt+Shift, Win+Space, the language bar), regardless of focus. Default on.
     /// </summary>
     public bool AnnounceOnLanguageChange { get; set; } = true;
+
+    /// <summary>
+    /// Announce the language on the first keystroke in a text field when at least
+    /// <see cref="TypingIdleSeconds"/> have passed since that field got focus.
+    /// </summary>
+    public bool AnnounceOnTypingAfterIdle { get; set; }
+
+    /// <summary>Seconds a focused text field must sit untouched before typing re-announces the language.</summary>
+    public int TypingIdleSeconds { get; set; } = 10;
 
     /// <summary>
     /// How often (ms) to check whether the keyboard layout changed. Only used when
@@ -97,6 +114,9 @@ public sealed class AppSettings
         ["es"] = 740,
         ["it"] = 831,
     };
+
+    /// <summary>Beep shape per two-letter ISO language code. Unlisted languages use <see cref="BeepSound.Tone"/>.</summary>
+    public Dictionary<string, BeepSound> BeepSounds { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
 
     // Events are not serialised by System.Text.Json.
     public event Action? Changed;

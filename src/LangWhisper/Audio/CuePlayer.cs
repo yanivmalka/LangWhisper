@@ -49,7 +49,18 @@ public sealed class CuePlayer : IDisposable
             return;
         }
 
-        _queue.Add(new Request(culture, langId, modeOverride));
+        _queue.Add(new Request(culture, langId, modeOverride, null));
+    }
+
+    /// <summary>Plays a beep with explicit, possibly unsaved, sound settings (the settings dialog's preview).</summary>
+    public void PreviewBeep(BeepSound sound, int frequencyHz, int volume)
+    {
+        if (_queue.IsAddingCompleted || _queue.Count > MaxQueued)
+        {
+            return;
+        }
+
+        _queue.Add(new Request(null, 0, CueMode.Beep, new BeepSpec(sound, frequencyHz, volume)));
     }
 
     private void RunWorker()
@@ -63,9 +74,9 @@ public sealed class CuePlayer : IDisposable
 
                 if (mode is CueMode.Beep or CueMode.WhisperAndBeep)
                 {
-                    double hz = ResolveFrequency(request);
-                    Log.Write($"cue: beep {hz:0} Hz for {label}");
-                    PlayBeep(request);
+                    BeepSpec beep = request.Beep ?? ResolveBeep(request);
+                    Log.Write($"cue: beep {beep.Sound} {beep.FrequencyHz} Hz for {label}");
+                    PlayBeep(beep);
                 }
 
                 if (mode is CueMode.Whisper or CueMode.WhisperAndBeep)
@@ -82,10 +93,9 @@ public sealed class CuePlayer : IDisposable
         }
     }
 
-    private void PlayBeep(Request request)
+    private void PlayBeep(BeepSpec beep)
     {
-        double frequency = ResolveFrequency(request);
-        byte[] wav = ToneGenerator.CreateSineWav(frequency, _settings.BeepDurationMs, _settings.BeepVolume / 100.0);
+        byte[] wav = ToneGenerator.CreateCueWav(beep.Sound, beep.FrequencyHz, _settings.BeepDurationMs, beep.Volume / 100.0);
 
         GCHandle handle = GCHandle.Alloc(wav, GCHandleType.Pinned);
         try
@@ -101,16 +111,24 @@ public sealed class CuePlayer : IDisposable
         }
     }
 
-    private double ResolveFrequency(Request request)
+    private BeepSpec ResolveBeep(Request request)
     {
         string? iso = request.Culture?.TwoLetterISOLanguageName;
-        if (iso is not null && _settings.BeepFrequencies.TryGetValue(iso, out int mapped))
+        int seed = request.Culture?.LCID ?? request.LangId;
+        return new BeepSpec(ResolveSound(_settings, iso), ResolveFrequency(_settings, iso, seed), _settings.BeepVolume);
+    }
+
+    public static BeepSound ResolveSound(AppSettings settings, string? iso) =>
+        iso is not null && settings.BeepSounds.TryGetValue(iso, out BeepSound sound) ? sound : BeepSound.Tone;
+
+    public static int ResolveFrequency(AppSettings settings, string? iso, int seed)
+    {
+        if (iso is not null && settings.BeepFrequencies.TryGetValue(iso, out int mapped))
         {
             return mapped;
         }
 
         // Deterministic fallback: spread unknown languages across a pleasant range.
-        int seed = request.Culture?.LCID ?? request.LangId;
         return 440 + Math.Abs(seed % 13) * 40; // 440-920 Hz
     }
 
@@ -179,5 +197,7 @@ public sealed class CuePlayer : IDisposable
         _queue.Dispose();
     }
 
-    private readonly record struct Request(CultureInfo? Culture, int LangId, CueMode? ModeOverride);
+    private readonly record struct Request(CultureInfo? Culture, int LangId, CueMode? ModeOverride, BeepSpec? Beep);
+
+    private readonly record struct BeepSpec(BeepSound Sound, int FrequencyHz, int Volume);
 }
