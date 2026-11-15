@@ -10,9 +10,11 @@ public static class KeyboardLayoutReader
     /// Returns the LANGID (low word of the HKL) currently active for the focused
     /// control of the foreground window, or 0 if it cannot be determined.
     /// </summary>
-    public static int GetForegroundLanguageId()
+    public static int GetForegroundLanguageId() => GetLanguageId(GetInputThreadId());
+
+    /// <summary>Returns the LANGID active for the given thread, or 0 if it cannot be determined.</summary>
+    public static int GetLanguageId(uint threadId)
     {
-        uint threadId = GetInputThreadId();
         if (threadId == 0)
         {
             return 0;
@@ -53,6 +55,18 @@ public static class KeyboardLayoutReader
         }
 
         return foregroundThread;
+    }
+
+    /// <summary>
+    /// True when Windows keeps a separate input language per app window (Settings →
+    /// "Let me use a different input method for each app window"); false for the
+    /// default, where one input language follows the user across windows.
+    /// </summary>
+    public static bool IsPerWindowInput()
+    {
+        bool perWindow = false;
+        return NativeMethods.SystemParametersInfo(NativeMethods.SPI_GETTHREADLOCALINPUTSETTINGS, 0, ref perWindow, 0)
+            && perWindow;
     }
 
     /// <summary>The distinct input languages installed for the user, in language-bar order.</summary>

@@ -92,12 +92,11 @@ public sealed class AppSettings
     public int BeepDurationMs { get; set; } = 320;
 
     /// <summary>
-    /// Delay (ms) after the last focus event before the language is read and the cue
-    /// played. Coalesces the burst of events Windows fires during a window switch and
-    /// gives the foreground window's remembered keyboard layout time to be applied
-    /// (the read is then settle-sampled on top of this).
+    /// Short pause (ms) after a focus event before it is handled, so the handful of
+    /// events one click raises are folded into a single pass. Keep it small: it is
+    /// added to the time before the cue is heard. 0 disables it.
     /// </summary>
-    public int DebounceMs { get; set; } = 250;
+    public int FocusCoalesceMs { get; set; } = 15;
 
     /// <summary>
     /// Beep frequency (Hz) per two-letter ISO language code. Languages not listed here

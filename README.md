@@ -40,10 +40,26 @@ typing.
 | Whisper | Late-bound `SAPI.SpVoice` (no NuGet dependency) |
 | Beep | Sine tone synthesised in memory, played via `winmm` `PlaySound` |
 
-Focus/window events are debounced (~250 ms), then the language read is
-settle-sampled (repeated every 120 ms until two reads agree) because Windows
-applies a window's remembered layout a moment *after* it becomes foreground —
-otherwise the tool would report the language of the window you just left.
+### Latency
+
+The cue is meant to be heard the moment the cursor lands in a text field:
+
+- The hooks only raise a flag; a single worker thread owns all state and handles
+  the event at once (no debounce timer; a ~15 ms pause folds the burst of events
+  one click raises into one pass — `FocusCoalesceMs` in `settings.json`).
+- Moving between fields of the same window reads the layout and announces
+  immediately.
+- After a window switch Windows applies the window's layout a moment *after* it
+  becomes foreground, so an immediate read can be stale. Instead of waiting for
+  it to settle, the reading is announced at once when it matches what is
+  expected (the language in use just before, or — with per-window input
+  languages turned on in Windows — the one that window had last time). Only a
+  reading that contradicts the expectation is re-read, for at most 250 ms.
+- For 600 ms after the switch the layout is re-checked every 40 ms; if Windows
+  applies a different layout late, the cue is corrected.
+- The SAPI voice is created and warmed up at startup, whispers are spoken
+  asynchronously, and a newer cue cuts off an older one rather than queueing
+  behind it.
 
 ## Build & run
 
@@ -95,11 +111,11 @@ src/LangWhisper/
   Program.cs                     entry point + single-instance guard
   Interop/NativeMethods.cs       P/Invoke surface
   Monitoring/
-    FocusLanguageMonitor.cs      hooks, debounce, orchestration
+    FocusLanguageMonitor.cs      hooks → single worker thread, orchestration
     EditableFocusDetector.cs     "is this a typing cursor?" logic
     KeyboardLayoutReader.cs      LANGID → CultureInfo
   Audio/
-    CuePlayer.cs                 STA worker: queue → beep and/or whisper
+    CuePlayer.cs                 STA worker: newest request wins → beep and/or whisper
     ToneGenerator.cs             in-memory WAV sine tone
   Configuration/                 AppSettings + JSON store
   Startup/AutoStart.cs           HKCU Run key
