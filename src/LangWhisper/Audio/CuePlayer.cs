@@ -11,12 +11,19 @@ namespace LangWhisper.Audio;
 /// <summary>
 /// Plays the audible cue for a language. All playback happens on a single dedicated
 /// STA worker thread so beeps and whispers never overlap and the SAPI voice object
-/// lives on one apartment. Requests are queued; if the user is switching windows
-/// fast the queue is capped so cues don't pile up.
+/// lives on one apartment.
+/// <para>
+/// The newest request always wins: a cue that is still waiting is dropped and one
+/// that is still sounding is cut off, so what you hear is never a stale language and
+/// a new cue never waits behind an old one. The voice is created and warmed up at
+/// startup so the first whisper isn't delayed by loading the speech engine.
+/// </para>
 /// </summary>
 public sealed class CuePlayer : IDisposable
 {
-    private const int MaxQueued = 2;
+    // SAPI SpeechVoiceSpeakFlags.
+    private const int SpeakAsync = 1;
+    private const int SpeakPurgeBeforeSpeak = 2;
 
     private readonly AppSettings _settings;
     private readonly BlockingCollection<Request> _queue = new(new ConcurrentQueue<Request>());
@@ -24,6 +31,9 @@ public sealed class CuePlayer : IDisposable
 
     private dynamic? _voice; // SAPI.SpVoice, late-bound so there is no NuGet/interop dependency.
     private bool _voiceUnavailable;
+
+    private long _latestRequest; // sequence number of the newest request
+    private int _beepPlaying;
 
     public CuePlayer(AppSettings settings)
     {
@@ -44,31 +54,58 @@ public sealed class CuePlayer : IDisposable
     /// </summary>
     public void Announce(CultureInfo? culture, int langId, CueMode? modeOverride = null)
     {
-        if (_queue.IsAddingCompleted || _queue.Count > MaxQueued)
-        {
-            return;
-        }
-
-        _queue.Add(new Request(culture, langId, modeOverride, null));
+        Enqueue(culture, langId, modeOverride, null);
     }
 
     /// <summary>Plays a beep with explicit, possibly unsaved, sound settings (the settings dialog's preview).</summary>
     public void PreviewBeep(BeepSound sound, int frequencyHz, int volume)
     {
-        if (_queue.IsAddingCompleted || _queue.Count > MaxQueued)
+        Enqueue(null, 0, CueMode.Beep, new BeepSpec(sound, frequencyHz, volume));
+    }
+
+    private void Enqueue(CultureInfo? culture, int langId, CueMode? modeOverride, BeepSpec? beep)
+    {
+        if (_queue.IsAddingCompleted)
         {
             return;
         }
 
-        _queue.Add(new Request(null, 0, CueMode.Beep, new BeepSpec(sound, frequencyHz, volume)));
+        long sequence = Interlocked.Increment(ref _latestRequest);
+
+        // Cut off a beep that is still sounding so the worker gets to this request now.
+        // Done before queueing, so it can only ever hit an older cue's beep.
+        // (A whisper in progress is purged by the worker when it starts the new one.)
+        if (Volatile.Read(ref _beepPlaying) == 1)
+        {
+            NativeMethods.PlaySoundMemory(IntPtr.Zero, IntPtr.Zero, 0);
+        }
+
+        try
+        {
+            _queue.Add(new Request(culture, langId, modeOverride, beep, sequence));
+        }
+        catch (InvalidOperationException)
+        {
+            // Shutting down.
+        }
     }
 
     private void RunWorker()
     {
+        WarmUpVoice();
+
         foreach (Request request in _queue.GetConsumingEnumerable())
         {
+            // Superseded while it waited: only the newest language is worth announcing.
+            if (request.Sequence != Interlocked.Read(ref _latestRequest))
+            {
+                continue;
+            }
+
             try
             {
+                StopSpeaking();
+
                 CueMode mode = request.ModeOverride ?? _settings.Mode;
                 string label = request.Culture?.EnglishName ?? $"LANGID 0x{request.LangId:X4}";
 
@@ -77,6 +114,12 @@ public sealed class CuePlayer : IDisposable
                     BeepSpec beep = request.Beep ?? ResolveBeep(request);
                     Log.Write($"cue: beep {beep.Sound} {beep.FrequencyHz} Hz for {label}");
                     PlayBeep(beep);
+                }
+
+                // A newer cue arrived during the beep; let it speak instead.
+                if (request.Sequence != Interlocked.Read(ref _latestRequest))
+                {
+                    continue;
                 }
 
                 if (mode is CueMode.Whisper or CueMode.WhisperAndBeep)
@@ -98,6 +141,7 @@ public sealed class CuePlayer : IDisposable
         byte[] wav = ToneGenerator.CreateCueWav(beep.Sound, beep.FrequencyHz, _settings.BeepDurationMs, beep.Volume / 100.0);
 
         GCHandle handle = GCHandle.Alloc(wav, GCHandleType.Pinned);
+        Volatile.Write(ref _beepPlaying, 1);
         try
         {
             NativeMethods.PlaySoundMemory(
@@ -107,6 +151,7 @@ public sealed class CuePlayer : IDisposable
         }
         finally
         {
+            Volatile.Write(ref _beepPlaying, 0);
             handle.Free();
         }
     }
@@ -132,35 +177,69 @@ public sealed class CuePlayer : IDisposable
         return 440 + Math.Abs(seed % 13) * 40; // 440-920 Hz
     }
 
-    private void Speak(Request request)
+    private bool EnsureVoice()
     {
         if (_voiceUnavailable)
         {
-            return;
+            return false;
         }
 
         if (_voice is null)
         {
             Type? type = Type.GetTypeFromProgID("SAPI.SpVoice");
-            if (type is null)
-            {
-                _voiceUnavailable = true;
-                return;
-            }
-
-            _voice = Activator.CreateInstance(type);
+            _voice = type is null ? null : Activator.CreateInstance(type);
             if (_voice is null)
             {
                 _voiceUnavailable = true;
-                return;
+                return false;
             }
         }
 
-        _voice.Volume = Math.Clamp(_settings.WhisperVolume, 0, 100);
+        return true;
+    }
+
+    /// <summary>
+    /// Creating the voice and its first utterance load the speech engine and open the
+    /// audio device, which can take a noticeable moment. Pay that at startup, silently.
+    /// </summary>
+    private void WarmUpVoice()
+    {
+        try
+        {
+            if (EnsureVoice())
+            {
+                _voice!.Volume = 0;
+                _voice.Speak(" ", 0);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"cue: voice warm-up failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Cuts off a whisper that is still being spoken.</summary>
+    private void StopSpeaking()
+    {
+        if (_voice is not null)
+        {
+            _voice.Speak(string.Empty, SpeakAsync | SpeakPurgeBeforeSpeak);
+        }
+    }
+
+    private void Speak(Request request)
+    {
+        if (!EnsureVoice())
+        {
+            return;
+        }
+
+        _voice!.Volume = Math.Clamp(_settings.WhisperVolume, 0, 100);
         _voice.Rate = Math.Clamp(_settings.WhisperRate, -10, 10);
 
-        // 0 == SVSFDefault: speak synchronously so the worker serialises cues.
-        _voice.Speak(SpokenName(request.Culture), 0);
+        // Asynchronous, so the worker is free to start (and this whisper to be cut
+        // off by) the next cue straight away instead of waiting for speech to finish.
+        _voice.Speak(SpokenName(request.Culture), SpeakAsync | SpeakPurgeBeforeSpeak);
     }
 
     private string SpokenName(CultureInfo? culture)
@@ -197,7 +276,7 @@ public sealed class CuePlayer : IDisposable
         _queue.Dispose();
     }
 
-    private readonly record struct Request(CultureInfo? Culture, int LangId, CueMode? ModeOverride, BeepSpec? Beep);
+    private readonly record struct Request(CultureInfo? Culture, int LangId, CueMode? ModeOverride, BeepSpec? Beep, long Sequence);
 
     private readonly record struct BeepSpec(BeepSound Sound, int FrequencyHz, int Volume);
 }

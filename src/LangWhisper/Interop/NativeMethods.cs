@@ -88,6 +88,16 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern int GetKeyboardLayoutList(int nBuff, [Out] IntPtr[]? lpList);
 
+    public const uint SPI_GETTHREADLOCALINPUTSETTINGS = 0x104E;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SystemParametersInfo(
+        uint uiAction,
+        uint uiParam,
+        [MarshalAs(UnmanagedType.Bool)] ref bool pvParam,
+        uint fWinIni);
+
     // ---- Caret detection ----------------------------------------------
 
     [StructLayout(LayoutKind.Sequential)]
